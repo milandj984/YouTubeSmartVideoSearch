@@ -39,10 +39,10 @@ const DB_VERSION = 2; // bumped from v1 to add lastAccessedAt index
 // ---------------------------------------------------------------------------
 
 /** Maximum number of videos to keep in cache. */
-const MAX_VIDEOS = 50;
+const MAX_VIDEOS = 20;
 
 /** Videos not accessed within this many days are removed. */
-const MAX_AGE_DAYS = 30;
+const MAX_AGE_DAYS = 7;
 
 let _db = null;
 

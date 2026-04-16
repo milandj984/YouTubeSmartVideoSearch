@@ -103,6 +103,7 @@ async function embedChunks(chunks) {
 async function embedQuery(query) {
   const response = await sendToOffscreen({ type: 'EMBED_QUERY', query });
   if (response?.error) throw new Error(response.error);
+  if (!response?.embedding) throw new Error('No embedding returned from offscreen document.');
   return response.embedding;
 }
 
@@ -112,7 +113,6 @@ async function embedQuery(query) {
 
 /** Content script files — must match the order declared in manifest.json. */
 const CONTENT_SCRIPTS = [
-  'content/transcript.js',
   'content/player.js',
   'content/content.js',
 ];
@@ -218,7 +218,7 @@ async function fetchTranscriptViaPageScript(videoId, tabId) {
                 composed: true,
                 detail: {
                   actionName: 'yt-update-engagement-panel-action',
-                  args: [{ targetId: 'engagement-panel-transcript', visibility: 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED' }],
+                  args: [{ targetId: 'engagement-panel-searchable-transcript', visibility: 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED' }],
                 },
               }));
               method = 'yt-action';
@@ -237,6 +237,19 @@ async function fetchTranscriptViaPageScript(videoId, tabId) {
           if (!segments.length) return { error: `no-dom-segments (${method})` };
 
           const entries = readSegments();
+
+          // Close the panel we opened. Only close if we were the ones who opened it.
+          // YouTube uses Polymer property observers — setting the JS property directly
+          // on the element triggers the visibility change, unlike setAttribute().
+          if (method !== 'none') {
+            const panel = document.querySelector(
+              'ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"]'
+            );
+            if (panel) {
+              panel.visibility = 'ENGAGEMENT_PANEL_VISIBILITY_HIDDEN';
+            }
+          }
+
           return entries ? { entries } : { error: 'dom-empty-entries' };
         } catch (e) {
           return { error: e.message };
@@ -440,23 +453,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         .then(() => sendResponse({ success: true }))
         .catch(err => sendResponse({ error: err.message }));
       return true;
-
-    case 'FETCH_URL': {
-      // Fetches a URL on behalf of the content script.
-      // Extension service workers are NOT intercepted by the page's own service
-      // worker, so this reliably retrieves YouTube timedtext/caption URLs.
-      const fetchUrl = message.url;
-      // Restrict to YouTube timedtext/caption URLs only
-      if (!fetchUrl || !fetchUrl.startsWith('https://www.youtube.com/api/timedtext')) {
-        sendResponse({ error: 'URL not allowed' });
-        return true;
-      }
-      fetch(fetchUrl, { credentials: 'include' })
-        .then(r => r.text())
-        .then(text => sendResponse({ text }))
-        .catch(err => sendResponse({ error: err.message }));
-      return true;
-    }
 
     default:
       return false;

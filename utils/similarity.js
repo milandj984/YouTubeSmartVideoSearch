@@ -53,6 +53,11 @@ export function topK(queryEmbedding, chunks, k = 5) {
   return scored.slice(0, k);
 }
 
+/** Escapes regex metacharacters in a string for safe use inside RegExp(). */
+function escapeRe(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
  * Full-text search using whole-word token matching (not substring).
  * Ranked by fraction of query tokens matched + verbatim phrase bonus.
@@ -66,14 +71,19 @@ export function fullTextSearch(query, chunks, k = 5) {
   const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (tokens.length === 0) return [];
 
+  // Pre-compile regexes once outside the chunk loop; escape metacharacters to
+  // prevent RegExp injection from user-supplied query text (e.g. "c++", "[test]").
+  const tokenRes = tokens.map(t => new RegExp(`(?<![a-z0-9])${escapeRe(t)}(?![a-z0-9])`));
+  const lowerQuery = query.toLowerCase();
+
   const scored = [];
   for (const chunk of chunks) {
     const lower = chunk.text.toLowerCase();
     // Whole-word match: token must be surrounded by non-word chars or string boundaries
-    const matched = tokens.filter(t => new RegExp(`(?<![a-z0-9])${t}(?![a-z0-9])`).test(lower)).length;
+    const matched = tokenRes.filter(re => re.test(lower)).length;
     if (matched === 0) continue;
     const density = matched / tokens.length;
-    const verbatim = lower.includes(query.toLowerCase()) ? 0.5 : 0;
+    const verbatim = lower.includes(lowerQuery) ? 0.5 : 0;
     scored.push({ text: chunk.text, start: chunk.start, score: density + verbatim });
   }
 

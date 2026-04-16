@@ -229,7 +229,10 @@ async function performSearch(query) {
   if (response?.type === 'SEARCH_RESULT') {
     renderResults(response.results);
   } else {
-    resultsContainer.innerHTML = `<p class="no-results">Search failed: ${response?.message ?? 'unknown error'}</p>`;
+    const errEl = document.createElement('p');
+    errEl.className = 'no-results';
+    errEl.textContent = `Search failed: ${response?.message ?? 'unknown error'}`;
+    resultsContainer.replaceChildren(errEl);
   }
 }
 

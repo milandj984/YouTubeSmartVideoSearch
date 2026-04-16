@@ -28,7 +28,6 @@
     {
       "matches": ["https://www.youtube.com/*"],
       "js": [
-        "content/transcript.js",
         "content/player.js",
         "content/content.js"
       ],

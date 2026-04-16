@@ -3,11 +3,10 @@
  *
  * Entry point for all content-script-side messaging.
  * Listens for messages from the background service worker and dispatches
- * them to the appropriate module (transcript.js or player.js).
+ * them to the appropriate module (player.js).
  *
  * Supported message types:
- *   GET_TRANSCRIPT → transcript.js getTranscript()
- *   SEEK           → player.js seekTo(time)
+ *   SEEK → player.js seekTo(time)
  */
 
 // content.js runs after transcript.js and player.js (declared first in manifest)
@@ -35,12 +34,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 async function handleMessage(message) {
   switch (message.type) {
-    case 'GET_TRANSCRIPT': {
-      // getTranscript is exposed by transcript.js (loaded before this file)
-      const transcript = await window.__ytSearch.getTranscript();
-      return { type: 'TRANSCRIPT_RESULT', transcript };
-    }
-
     case 'SEEK': {
       const success = window.__ytSearch.seekTo(message.time);
       return { type: 'SEEK_RESULT', success };
