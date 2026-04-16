@@ -33,6 +33,13 @@ env.localModelPath = chrome.runtime.getURL('models/');
 // ONNX WASM binaries are co-located with the bundled embedder in dist/offscreen/
 env.backends.onnx.wasm.wasmPaths = chrome.runtime.getURL('offscreen/');
 
+// Force single-threaded WASM — Chrome extensions block blob-URL importScripts
+// that ONNX Runtime uses for its multi-threaded workers.
+env.backends.onnx.wasm.numThreads = 1;
+
+// chrome-extension:// URLs are not cacheable via the Cache API — disable to suppress warnings.
+env.useBrowserCache = false;
+
 // ---------------------------------------------------------------------------
 // Lazy pipeline singleton
 // ---------------------------------------------------------------------------
@@ -77,7 +84,12 @@ async function embedText(pipe, text) {
 // Message handler
 // ---------------------------------------------------------------------------
 
+const HANDLED_TYPES = new Set(['PING', 'EMBED_QUERY', 'EMBED_CHUNKS']);
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  // Ignore messages intended for other extension pages (e.g. SEARCH → SW)
+  if (!HANDLED_TYPES.has(message.type)) return false;
+
   handleMessage(message)
     .then(sendResponse)
     .catch(err => sendResponse({ error: err.message }));
@@ -124,8 +136,5 @@ async function handleMessage(message) {
 
       return { type: 'EMBED_CHUNKS_RESULT', chunks: result };
     }
-
-    default:
-      return { error: `Unknown message type: ${message.type}` };
   }
 }

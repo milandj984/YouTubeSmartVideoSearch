@@ -10,6 +10,10 @@
   padding: 0;
 }
 
+/* Ensure [hidden] is always respected, even when a display rule
+   (like .state { display: flex }) would otherwise override it. */
+[hidden] { display: none !important; }
+
 :root {
   --yt-red:       #ff0000;
   --yt-red-hover: #cc0000;

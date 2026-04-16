@@ -198,6 +198,8 @@ async function startScan() {
   if (response.type === 'SCAN_ERROR') {
     if (response.noTranscript) {
       setState('no-transcript');
+      const diag = document.getElementById('no-transcript-diag');
+      if (diag) diag.textContent = response.message ?? '';
     } else {
       setState('error');
       document.getElementById('error-message').textContent = response.message ?? 'Unknown error';
@@ -316,7 +318,7 @@ document.getElementById('btn-retry')?.addEventListener('click', startScan);
 document.getElementById('btn-rescan')?.addEventListener('click', rescanVideo);
 
 const searchInput = document.getElementById('search-input');
-const debouncedSearch = debounce(performSearch, 300);
+const debouncedSearch = debounce(performSearch, 400);
 
 searchInput?.addEventListener('input', (e) => {
   const query = e.target.value;

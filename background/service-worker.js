@@ -18,7 +18,7 @@
  */
 
 import { chunkTranscript } from '../utils/chunker.js';
-import { topK } from '../utils/similarity.js';
+import { topK, fullTextSearch, hybridSearch } from '../utils/similarity.js';
 import {
   saveVideo,
   saveChunks,
@@ -110,15 +110,162 @@ async function embedQuery(query) {
 // Content script messaging helpers
 // ---------------------------------------------------------------------------
 
+/** Content script files — must match the order declared in manifest.json. */
+const CONTENT_SCRIPTS = [
+  'content/transcript.js',
+  'content/player.js',
+  'content/content.js',
+];
+
 /**
- * Sends a message to the content script in the given tab and returns the response.
+ * Injects the content scripts into a tab programmatically.
+ * Used as a fallback when the scripts weren't auto-injected (e.g. the tab
+ * was already open when the extension was installed or reloaded).
+ *
+ * @param {number} tabId
+ */
+async function injectContentScripts(tabId) {
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: CONTENT_SCRIPTS,
+  });
+}
+
+/**
+ * Sends a message to the content script in the given tab.
+ * If the content script isn't present yet, injects it first then retries once.
  *
  * @param {number} tabId
  * @param {object} message
  * @returns {Promise<object>}
  */
-function sendToTab(tabId, message) {
-  return chrome.tabs.sendMessage(tabId, message);
+async function sendToTab(tabId, message) {
+  try {
+    return await chrome.tabs.sendMessage(tabId, message);
+  } catch (err) {
+    const isNotFound = err.message?.includes('Receiving end does not exist') ||
+                       err.message?.includes('Could not establish connection');
+    if (!isNotFound) throw err;
+
+    // Content script not present — inject it now, then retry
+    await injectContentScripts(tabId);
+    return chrome.tabs.sendMessage(tabId, message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Transcript fetching
+// ---------------------------------------------------------------------------
+
+/**
+ * Opens YouTube's built-in transcript panel via executeScript in MAIN world,
+ * then reads the already-rendered segment elements from the DOM.
+ * No fetch calls — bypasses YouTube's SW interception entirely.
+ */
+async function fetchTranscriptViaPageScript(videoId, tabId) {
+  let results;
+  try {
+    results = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: 'MAIN',
+      func: async () => {
+        try {
+          const parseTime = (s) => {
+            const parts = s.trim().split(':').map(Number);
+            if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+            if (parts.length === 2) return parts[0] * 60 + parts[1];
+            return 0;
+          };
+
+          const readSegments = () => {
+            const segs = document.querySelectorAll('ytd-transcript-segment-renderer');
+            if (!segs.length) return null;
+            const entries = [];
+            for (const seg of segs) {
+              const timeEl = seg.querySelector('.segment-timestamp');
+              const textEl = seg.querySelector('.segment-text');
+              const timeStr = (timeEl?.textContent || '').trim();
+              const text = (textEl?.textContent || '').trim();
+              if (!timeStr || !text) continue;
+              entries.push({ text, start: parseTime(timeStr) });
+            }
+            return entries.length ? entries : null;
+          };
+
+          // If the panel is already open, just read it
+          const existing = readSegments();
+          if (existing) {
+            return { entries: existing };
+          }
+
+          // Try to open the transcript panel
+          let method = 'none';
+
+          // Method 1: click the "Show transcript" button in the description
+          const btn = document.querySelector(
+            'ytd-video-description-transcript-section-renderer button, ' +
+            'button[aria-label*="ranscript" i], [role="button"][aria-label*="ranscript" i]'
+          );
+          if (btn) {
+            btn.click();
+            method = 'btn-click';
+          } else {
+            // Method 2: dispatch YouTube's internal engagement-panel action
+            const app = document.querySelector('ytd-app');
+            if (app) {
+              app.dispatchEvent(new CustomEvent('yt-action', {
+                bubbles: true,
+                composed: true,
+                detail: {
+                  actionName: 'yt-update-engagement-panel-action',
+                  args: [{ targetId: 'engagement-panel-transcript', visibility: 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED' }],
+                },
+              }));
+              method = 'yt-action';
+            }
+          }
+          
+          // Poll up to 10 s for segments to appear
+          const segments = await new Promise(resolve => {
+            let tries = 0;
+            const timer = setInterval(() => {
+              const segs = document.querySelectorAll('ytd-transcript-segment-renderer');
+              if (segs.length > 0 || ++tries >= 50) { clearInterval(timer); resolve(segs); }
+            }, 200);
+          });
+
+          if (!segments.length) return { error: `no-dom-segments (${method})` };
+
+          const entries = readSegments();
+          return entries ? { entries } : { error: 'dom-empty-entries' };
+        } catch (e) {
+          return { error: e.message };
+        }
+      },
+    });
+  } catch (e) {
+    return null;
+  }
+
+  const result = results?.[0]?.result;
+  if (!result || result.error) {
+    return null;
+  }
+  return result.entries || null;
+}
+
+/**
+ * Fetches the full transcript for a video.
+ * Uses executeScript into the page's MAIN world to open YouTube's own transcript
+ * panel and read the already-rendered segment elements — no network fetch needed.
+ */
+async function fetchTranscriptForVideo(videoId, tabId) {
+  const entries = await fetchTranscriptViaPageScript(videoId, tabId);
+  if (entries && entries.length > 0) return entries;
+
+  const err = new Error('This video does not have captions/subtitles available.');
+  err.name = 'NoTranscriptError';
+  throw err;
 }
 
 // ---------------------------------------------------------------------------
@@ -139,22 +286,20 @@ function sendToTab(tabId, message) {
  */
 async function handleScanVideo({ videoId, tabId, title }, sendResponse) {
   try {
-    // Step 1: Get transcript
+    // Step 1: Get transcript — fetched in background SW, bypasses YouTube's own SW
     sendProgressToPopup({ stage: 'transcript', message: 'Fetching transcript…' });
 
-    const transcriptResponse = await sendToTab(tabId, { type: 'GET_TRANSCRIPT' });
-
-    if (transcriptResponse?.error) {
-      const isNoTranscript = transcriptResponse.errorName === 'NoTranscriptError';
+    let transcript;
+    try {
+      transcript = await fetchTranscriptForVideo(videoId, tabId);
+    } catch (err) {
       sendResponse({
         type: 'SCAN_ERROR',
-        noTranscript: isNoTranscript,
-        message: transcriptResponse.error,
+        noTranscript: err.name === 'NoTranscriptError',
+        message: err.message + (err.diagnostics ? ' | diag: ' + err.diagnostics.join(' | ') : ''),
       });
       return;
     }
-
-    const { transcript } = transcriptResponse;
 
     // Step 2: Chunk
     sendProgressToPopup({ stage: 'chunking', message: 'Chunking transcript…' });
@@ -213,7 +358,9 @@ async function handleSearch({ videoId, query }, sendResponse) {
       return;
     }
 
-    const results = topK(queryEmbedding, chunks, 5);
+    const semanticResults = topK(queryEmbedding, chunks, 5);
+    const textResults = fullTextSearch(query, chunks, 5);
+    const results = hybridSearch(semanticResults, textResults, 5);
 
     // Update lastAccessedAt so this video is not evicted as long as it's used
     touchVideo(videoId).catch(() => {});
@@ -293,6 +440,23 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         .then(() => sendResponse({ success: true }))
         .catch(err => sendResponse({ error: err.message }));
       return true;
+
+    case 'FETCH_URL': {
+      // Fetches a URL on behalf of the content script.
+      // Extension service workers are NOT intercepted by the page's own service
+      // worker, so this reliably retrieves YouTube timedtext/caption URLs.
+      const fetchUrl = message.url;
+      // Restrict to YouTube timedtext/caption URLs only
+      if (!fetchUrl || !fetchUrl.startsWith('https://www.youtube.com/api/timedtext')) {
+        sendResponse({ error: 'URL not allowed' });
+        return true;
+      }
+      fetch(fetchUrl, { credentials: 'include' })
+        .then(r => r.text())
+        .then(text => sendResponse({ text }))
+        .catch(err => sendResponse({ error: err.message }));
+      return true;
+    }
 
     default:
       return false;

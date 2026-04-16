@@ -1,22 +1,19 @@
 /**
  * content/transcript.js
  *
- * Extracts a YouTube video's transcript via ytInitialPlayerResponse — the
- * same data object YouTube uses internally. This is significantly more
- * resilient than DOM scraping because it survives YouTube UI redesigns.
+ * Extracts a YouTube video's transcript. Works in two modes:
  *
- * Flow:
- *   1. Read ytInitialPlayerResponse from window
- *   2. Extract the first available caption track URL
- *   3. Fetch the JSON3-format transcript from that URL
- *   4. Parse and return [{text, start}]
+ *  1. Fast path — reads ytInitialPlayerResponse from window (only valid if
+ *     its videoId matches the current URL, i.e. the page was hard-loaded).
  *
- * Throws:
- *   NoTranscriptError — if the video has no captions at all
- *   Error             — for network / parse failures
+ *  2. Fetch fallback — fetches the YouTube watch page HTML and parses
+ *     ytInitialPlayerResponse out of the raw source. This is the reliable
+ *     path for SPA navigation, injected content scripts, and any case where
+ *     the window global is stale or absent.
  *
- * NOTE: This file is injected as a plain content script (not an ES module).
- * It attaches its public API to window.__ytSearch for use by content.js.
+ * No user interaction is required — captions don't need to be opened.
+ *
+ * NOTE: Plain content script (not ES module). Attaches to window.__ytSearch.
  */
 
 // Initialise shared namespace
@@ -30,119 +27,154 @@ class NoTranscriptError extends Error {
 }
 
 /**
- * Returns the list of available caption tracks from ytInitialPlayerResponse.
- * Returns an empty array if none are found.
- *
- * @returns {Array<{baseUrl: string, languageCode: string, name: {simpleText: string}}>}
- */
-function getCaptionTracks() {
-  try {
-    const playerResponse = window.ytInitialPlayerResponse;
-    if (!playerResponse) return [];
-
-    const tracks =
-      playerResponse?.captions
-        ?.playerCaptionsTracklistRenderer
-        ?.captionTracks;
-
-    return Array.isArray(tracks) ? tracks : [];
-  } catch {
-    return [];
-  }
-}
-
-/**
- * Picks the best caption track URL.
- * Prefers English (en / en-US / en-GB), otherwise falls back to the first track.
- *
- * @param {Array} tracks
+ * Returns the current YouTube video ID from the page URL.
  * @returns {string|null}
  */
-function selectTrackUrl(tracks) {
-  if (tracks.length === 0) return null;
-
-  const english = tracks.find(t =>
-    t.languageCode?.startsWith('en')
-  );
-  const chosen = english ?? tracks[0];
-
-  // Force JSON3 format for structured output
-  const url = new URL(chosen.baseUrl);
-  url.searchParams.set('fmt', 'json3');
-  return url.toString();
+function getCurrentVideoId() {
+  return new URLSearchParams(window.location.search).get('v');
 }
 
 /**
- * Fetches the transcript JSON from the caption track URL and normalises it
- * into the [{text, start}] format used throughout the extension.
+ * Injects page-bridge.js into the page's JS world via <script src=...> so it
+ * can read ytInitialPlayerResponse / ytcfg which are invisible to content
+ * scripts. Returns { baseUrl, languageCode } for the best caption track.
  *
- * YouTube JSON3 format:
- * {
- *   events: [
- *     { tStartMs: 1000, dDurationMs: 2000, segs: [{utf8: "Hello"}, ...] },
- *     ...
- *   ]
- * }
- *
- * @param {string} url
- * @returns {Promise<Array<{text: string, start: number}>>}
+ * @param {string} videoId
+ * @returns {Promise<{baseUrl:string, languageCode:string}|null>}
  */
-async function fetchAndParseTranscript(url) {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to fetch transcript: HTTP ${response.status}`);
+function getTrackFromPageContext(videoId) {
+  return new Promise((resolve) => {
+    const replyEvent = '__ytSearch_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+    const safeId = String(videoId).replace(/[^A-Za-z0-9_-]/g, '');
+    const timer = setTimeout(() => { console.log('[YTSearch] page-bridge timed out'); resolve(null); }, 8000);
+
+    window.addEventListener(replyEvent, (e) => {
+      clearTimeout(timer);
+      const detail = e.detail;
+      resolve(detail && detail.baseUrl ? detail : null);
+    }, { once: true });
+
+    const bridgeUrl = new URL(chrome.runtime.getURL('content/page-bridge.js'));
+    bridgeUrl.searchParams.set('v', safeId);
+    bridgeUrl.searchParams.set('e', replyEvent);
+
+    const script = document.createElement('script');
+    script.src = bridgeUrl.href;
+    script.onload = () => script.remove();
+    document.documentElement.appendChild(script);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Transcript format parsers (run locally in content script)
+// ---------------------------------------------------------------------------
+
+function parseJson3(text) {
+  try {
+    const data = JSON.parse(text);
+    const entries = [];
+    for (const ev of (data?.events ?? [])) {
+      if (!ev.segs) continue;
+      const t = ev.segs.map(s => s.utf8 ?? '').join('').replace(/\n/g, ' ').trim();
+      if (t) entries.push({ text: t, start: (ev.tStartMs ?? 0) / 1000 });
+    }
+    return entries;
+  } catch { return []; }
+}
+
+function parseVtt(text) {
+  const out = [];
+  const tsRe = /(\d{2}:\d{2}:\d{2}[.,]\d{3})\s*-->/;
+  for (const block of text.split(/\n\n+/)) {
+    const lines = block.trim().split('\n');
+    let tsLine = -1;
+    for (let i = 0; i < lines.length; i++) { if (tsRe.test(lines[i])) { tsLine = i; break; } }
+    if (tsLine === -1) continue;
+    const m = tsRe.exec(lines[tsLine]);
+    const p = m[1].split(/[:,.]/);
+    const start = +p[0] * 3600 + +p[1] * 60 + +p[2] + +p[3] / 1000;
+    const t = lines.slice(tsLine + 1).join(' ').replace(/<[^>]+>/g, '').trim();
+    if (t) out.push({ text: t, start });
   }
+  return out;
+}
 
-  const data = await response.json();
-  const events = data?.events ?? [];
-
-  const entries = [];
-
-  for (const event of events) {
-    if (!event.segs) continue;
-
-    const text = event.segs
-      .map(seg => seg.utf8 ?? '')
-      .join('')
-      .replace(/\n/g, ' ')
-      .trim();
-
-    if (!text) continue;
-
-    entries.push({
-      text,
-      start: (event.tStartMs ?? 0) / 1000, // convert ms → seconds
-    });
+function parseXml(text) {
+  const out = [];
+  const re = /<text[^>]+start="([\d.]+)"[^>]*>([\s\S]*?)<\/text>/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const t = m[2]
+      .replace(/&#39;/g, "'").replace(/&amp;/g, '&').replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+      .replace(/<[^>]+>/g, '').replace(/\n/g, ' ').trim();
+    if (t) out.push({ text: t, start: parseFloat(m[1]) });
   }
+  return out;
+}
 
-  return entries;
+// ---------------------------------------------------------------------------
+// Fetch via background service worker (bypasses YouTube's own service worker)
+// ---------------------------------------------------------------------------
+
+async function fetchViaBackground(url) {
+  const response = await chrome.runtime.sendMessage({ type: 'FETCH_URL', url });
+  if (response?.error) throw new Error(response.error);
+  return response?.text ?? '';
+}
+
+function withFmt(baseUrl, fmt) {
+  try {
+    const u = new URL(baseUrl);
+    u.searchParams.set('fmt', fmt);
+    return u.toString();
+  } catch { return baseUrl + '&fmt=' + fmt; }
 }
 
 /**
  * Returns the full transcript for the currently loaded YouTube video.
  *
+ * Strategy:
+ *  1. Page bridge (injected script) reads ytInitialPlayerResponse/ytcfg from
+ *     the page's own JS world to get the caption track URL.
+ *  2. Background service worker fetches the caption URL — it is NOT intercepted
+ *     by YouTube's own service worker, unlike fetches from the page context.
+ *  3. Tries json3 → vtt → xml formats in sequence.
+ *
  * @returns {Promise<Array<{text: string, start: number}>>}
  * @throws {NoTranscriptError}
  */
 async function getTranscript() {
-  const tracks = getCaptionTracks();
+  const videoId = getCurrentVideoId();
+  console.log('[YTSearch] videoId:', videoId);
+  if (!videoId) throw new NoTranscriptError();
 
-  if (tracks.length === 0) {
-    throw new NoTranscriptError();
+  const track = await getTrackFromPageContext(videoId);
+  console.log('[YTSearch] track from page bridge:', track ? track.languageCode : 'null');
+  if (!track) throw new NoTranscriptError();
+
+  const formats = [
+    { url: withFmt(track.baseUrl, 'json3'), parse: parseJson3, label: 'json3' },
+    { url: withFmt(track.baseUrl, 'vtt'),   parse: parseVtt,   label: 'vtt'   },
+    { url: withFmt(track.baseUrl, 'xml'),   parse: parseXml,   label: 'xml'   },
+  ];
+
+  for (const { url, parse, label } of formats) {
+    try {
+      const text = await fetchViaBackground(url);
+      console.log('[YTSearch] bg fetch', label, 'length:', text.length);
+      if (!text.trim()) continue;
+      const entries = parse(text);
+      if (entries.length > 0) {
+        console.log('[YTSearch] parsed', entries.length, 'entries via', label);
+        return entries;
+      }
+    } catch (e) {
+      console.log('[YTSearch]', label, 'failed:', e.message);
+    }
   }
 
-  const url = selectTrackUrl(tracks);
-  if (!url) {
-    throw new NoTranscriptError();
-  }
-
-  const entries = await fetchAndParseTranscript(url);
-
-  if (entries.length === 0) {
-    throw new NoTranscriptError();
-  }
-
-  return entries;
+  throw new NoTranscriptError();
 }
 
 // Attach to shared namespace so content.js can invoke it

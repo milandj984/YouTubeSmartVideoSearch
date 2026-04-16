@@ -53,8 +53,8 @@
 
   "web_accessible_resources": [
     {
-      "resources": ["models/*", "offscreen/*"],
-      "matches": ["<all_urls>"]
+      "resources": ["models/*", "offscreen/*", "content/*"],
+      "matches": ["https://www.youtube.com/*"]
     }
   ]
 }
