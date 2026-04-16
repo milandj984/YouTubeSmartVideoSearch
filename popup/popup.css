@@ -1,0 +1,402 @@
+/* ============================================================
+   popup.css — YouTube Smart Search Extension
+   Dark theme, YouTube-red accent
+   ============================================================ */
+
+/* ── Reset & base ─────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --yt-red:       #ff0000;
+  --yt-red-hover: #cc0000;
+  --bg:           #0f0f0f;
+  --surface:      #1a1a1a;
+  --surface-2:    #272727;
+  --border:       #333333;
+  --text:         #f1f1f1;
+  --text-muted:   #aaaaaa;
+  --text-dim:     #717171;
+  --radius:       8px;
+  --radius-sm:    4px;
+  --transition:   150ms ease;
+}
+
+html, body {
+  width: 360px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* ── Container ────────────────────────────────────────────── */
+.container {
+  display: flex;
+  flex-direction: column;
+  min-height: 200px;
+  padding-bottom: 8px;
+}
+
+/* ── Header ───────────────────────────────────────────────── */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.header__logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header__title {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* ── States ───────────────────────────────────────────────── */
+.state {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ── Empty / idle state ───────────────────────────────────── */
+.empty-state {
+  text-align: center;
+  padding: 24px 16px;
+}
+
+.empty-state__icon {
+  font-size: 36px;
+  margin-bottom: 10px;
+}
+
+.empty-state__text {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* ── Ready state ──────────────────────────────────────────── */
+.video-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+.video-info__label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.video-info__id {
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  color: var(--yt-red);
+}
+
+.hint {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+/* ── Buttons ──────────────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  padding: 9px 16px;
+  transition: background var(--transition), opacity var(--transition);
+  text-decoration: none;
+}
+
+.btn--primary {
+  background: var(--yt-red);
+  color: #fff;
+  width: 100%;
+}
+
+.btn--primary:hover {
+  background: var(--yt-red-hover);
+}
+
+.btn--primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn--secondary {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  width: 100%;
+  margin-top: 8px;
+}
+
+.btn--secondary:hover {
+  background: var(--border);
+}
+
+.btn--ghost {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+.btn--ghost:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+}
+
+.btn--small {
+  font-size: 12px;
+  padding: 5px 10px;
+}
+
+/* ── Scanning / progress ──────────────────────────────────── */
+.progress-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.scanning-status {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.progress-bar {
+  width: 100%;
+  height: 4px;
+  background: var(--surface-2);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-bar__fill {
+  height: 100%;
+  width: 0%;
+  background: var(--yt-red);
+  border-radius: 2px;
+  transition: width 300ms ease;
+}
+
+/* Indeterminate animation for stages without a precise percentage */
+.progress-bar__fill--indeterminate {
+  width: 40% !important;
+  animation: indeterminate 1.4s ease-in-out infinite;
+}
+
+@keyframes indeterminate {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+
+.scanning-detail {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+/* ── Warning / error card ─────────────────────────────────── */
+.warning-card {
+  background: #1c1500;
+  border: 1px solid #5a4500;
+  border-radius: var(--radius);
+  padding: 16px;
+  text-align: center;
+}
+
+.warning-card--error {
+  background: #1c0000;
+  border-color: #5a0000;
+}
+
+.warning-card__icon {
+  font-size: 28px;
+  margin-bottom: 8px;
+}
+
+.warning-card__title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.warning-card__body {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+/* ── Search bar ───────────────────────────────────────────── */
+.search-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.search-bar__icon {
+  position: absolute;
+  left: 10px;
+  color: var(--text-dim);
+  pointer-events: none;
+  flex-shrink: 0;
+}
+
+.search-bar__input {
+  width: 100%;
+  padding: 9px 12px 9px 34px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 14px;
+  outline: none;
+  transition: border-color var(--transition);
+}
+
+.search-bar__input:focus {
+  border-color: var(--yt-red);
+}
+
+.search-bar__input::placeholder {
+  color: var(--text-dim);
+}
+
+/* ── Search hint ──────────────────────────────────────────── */
+.search-hint {
+  font-size: 12px;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+/* ── Results list ─────────────────────────────────────────── */
+.results {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 320px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.results:empty {
+  display: none;
+}
+
+/* ── Result card ──────────────────────────────────────────── */
+.result-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+  text-align: left;
+  width: 100%;
+}
+
+.result-card:hover {
+  background: var(--surface-2);
+  border-color: var(--yt-red);
+}
+
+.result-card__timestamp {
+  flex-shrink: 0;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--yt-red);
+  background: #1a0000;
+  border: 1px solid #3a0000;
+  border-radius: 3px;
+  padding: 2px 6px;
+  line-height: 1.4;
+  margin-top: 1px;
+}
+
+.result-card__text {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+.result-card__score {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-dim);
+  align-self: flex-start;
+  margin-left: auto;
+}
+
+/* ── Loading spinner (inline) ─────────────────────────────── */
+.results--loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  color: var(--text-muted);
+  font-size: 13px;
+  gap: 8px;
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--border);
+  border-top-color: var(--yt-red);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── No results ───────────────────────────────────────────── */
+.no-results {
+  text-align: center;
+  padding: 16px;
+  color: var(--text-dim);
+  font-size: 13px;
+}
+
+/* ── Footer actions ───────────────────────────────────────── */
+.footer-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 4px;
+}

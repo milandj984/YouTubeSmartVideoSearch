@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Offscreen — Embedder</title>
+</head>
+<body>
+  <!--
+    This hidden page runs inside Chrome's offscreen API context.
+    It loads the bundled embedder.js which initialises the ONNX/WASM pipeline.
+    No visible content is rendered here.
+  -->
+  <script type="module" src="embedder.js"></script>
+</body>
+</html>
