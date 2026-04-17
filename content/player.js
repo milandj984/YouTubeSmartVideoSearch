@@ -52,5 +52,22 @@ function findVideoElement() {
   return allVideos.find(v => v.duration > 0) ?? null;
 }
 
+/**
+ * Toggles play/pause on the YouTube video.
+ * @returns {'playing'|'paused'|'not-found'}
+ */
+function togglePlayback() {
+  const video = findVideoElement();
+  if (!video) return 'not-found';
+  if (video.paused) {
+    video.play().catch(() => {});
+    return 'playing';
+  } else {
+    video.pause();
+    return 'paused';
+  }
+}
+
 // Attach to shared namespace so content.js can invoke it
 window.__ytSearch.seekTo = seekTo;
+window.__ytSearch.togglePlayback = togglePlayback;

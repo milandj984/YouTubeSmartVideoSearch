@@ -442,6 +442,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       handleSeek(message, sendResponse);
       return true;
 
+    case 'TOGGLE_PLAYBACK':
+      sendToTab(message.tabId, { type: 'TOGGLE_PLAYBACK' })
+        .then(result => sendResponse({ type: 'TOGGLE_PLAYBACK_RESULT', state: result?.state }))
+        .catch(err => sendResponse({ error: err.message }));
+      return true;
+
     case 'VIDEO_EXISTS':
       videoExists(message.videoId)
         .then(exists => sendResponse({ exists }))

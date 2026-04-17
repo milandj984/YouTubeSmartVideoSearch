@@ -213,6 +213,8 @@ async function startScan() {
 
 async function seekTo(time) {
   await sendMessage({ type: 'SEEK', tabId: currentTabId, time });
+  // Seeking always resumes playback — reflect that in the pause button
+  setPauseButtonState('playing');
 }
 
 async function performSearch(query) {
@@ -319,6 +321,21 @@ async function init() {
 document.getElementById('btn-scan')?.addEventListener('click', startScan);
 document.getElementById('btn-retry')?.addEventListener('click', startScan);
 document.getElementById('btn-rescan')?.addEventListener('click', rescanVideo);
+
+const btnPause = document.getElementById('btn-pause');
+
+function setPauseButtonState(state) {
+  const isPlaying = state === 'playing';
+  document.getElementById('icon-pause').style.display = isPlaying ? '' : 'none';
+  document.getElementById('icon-play').style.display = isPlaying ? 'none' : '';
+  document.getElementById('btn-pause-label').textContent = isPlaying ? 'Pause' : 'Play';
+  btnPause?.setAttribute('aria-pressed', String(!isPlaying));
+}
+
+btnPause?.addEventListener('click', async () => {
+  const response = await sendMessage({ type: 'TOGGLE_PLAYBACK', tabId: currentTabId });
+  setPauseButtonState(response?.state ?? 'playing');
+});
 
 const searchInput = document.getElementById('search-input');
 const debouncedSearch = debounce(performSearch, 400);

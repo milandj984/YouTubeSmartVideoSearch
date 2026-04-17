@@ -401,6 +401,6 @@ html, body {
 /* ── Footer actions ───────────────────────────────────────── */
 .footer-actions {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
   padding-top: 4px;
 }
