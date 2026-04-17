@@ -272,19 +272,27 @@ chrome.runtime.onMessage.addListener((message) => {
   const { stage, done, total, message: msg } = message;
 
   if (stage === 'embedding' && total > 0) {
-    // Map embedding progress into the 20–95% range of the overall scan
-    const percent = Math.round(20 + (done / total) * 75);
-    setProgress({
-      message: 'Embedding chunks…',
-      detail: `${done} / ${total} chunks processed`,
-      percent,
-    });
+    // Only switch to determinate if there are enough chunks that progress is meaningful
+    if (total >= 20) {
+      const percent = Math.round(20 + (done / total) * 75);
+      setProgress({
+        message: 'Scanning…',
+        detail: `${percent}%`,
+        percent,
+      });
+    } else {
+      setProgress({
+        message: 'Scanning…',
+        detail: '',
+        percent: null,
+      });
+    }
   } else if (stage === 'transcript') {
-    setProgress({ message: msg ?? 'Fetching transcript…', percent: 5 });
+    setProgress({ message: msg ?? 'Fetching transcript…', percent: null });
   } else if (stage === 'chunking') {
-    setProgress({ message: msg ?? 'Chunking transcript…', percent: 20 });
+    setProgress({ message: msg ?? 'Chunking transcript…', percent: null });
   } else if (stage === 'saving') {
-    setProgress({ message: 'Saving to cache…', percent: 97 });
+    setProgress({ message: 'Saving to cache…', percent: null });
   }
 });
 

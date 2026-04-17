@@ -424,7 +424,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       stage: 'embedding',
       done: message.done,
       total: message.total,
-      message: `Embedding chunks… (${message.done}/${message.total})`,
+      message: `Scanning…`,
     });
     return false; // No async response needed
   }
