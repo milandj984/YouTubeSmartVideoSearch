@@ -111,7 +111,13 @@ async function build() {
 
 /**
  * @xenova/transformers relies on onnxruntime-web WASM binaries.
- * esbuild bundles the JS but cannot inline the WASM blobs, so we copy them.
+ * esbuild bundles the JS (including ORT) but cannot inline WASM blobs, so we
+ * copy only the WASM files that are actually needed at runtime.
+ *
+ * We set numThreads=1 in embedder.js, so the *-threaded.wasm variants are
+ * never loaded and can be omitted — saving ~18 MB.
+ * The ORT JS files (ort.js, ort-web.js, ort*.min.js, etc.) are already
+ * bundled inside embedder.js by esbuild, so copying them is pure waste.
  */
 function copyOnnxWasmBinaries() {
   const onnxSrc = path.join('node_modules', 'onnxruntime-web', 'dist');
@@ -120,11 +126,28 @@ function copyOnnxWasmBinaries() {
     console.warn('[build] WARNING: onnxruntime-web dist not found, skipping WASM copy.');
     return;
   }
-  const wasmFiles = fs.readdirSync(onnxSrc).filter(f => f.endsWith('.wasm') || f.endsWith('.mjs') || f.endsWith('.js'));
-  for (const file of wasmFiles) {
-    copyFileSync(path.join(onnxSrc, file), path.join(onnxDest, file));
+
+  // Only copy the two single-threaded WASM binaries.
+  // ort-wasm-simd.wasm  → used on CPUs with SIMD support (virtually all modern Chrome)
+  // ort-wasm.wasm       → fallback for non-SIMD CPUs
+  // Threaded variants are skipped because numThreads is pinned to 1 in embedder.js.
+  const NEEDED_WASM = new Set([
+    'ort-wasm-simd.wasm',
+    'ort-wasm.wasm',
+  ]);
+
+  const allFiles = fs.readdirSync(onnxSrc);
+  let copied = 0;
+  let skipped = 0;
+  for (const file of allFiles) {
+    if (NEEDED_WASM.has(file)) {
+      copyFileSync(path.join(onnxSrc, file), path.join(onnxDest, file));
+      copied++;
+    } else {
+      skipped++;
+    }
   }
-  console.log(`[build] Copied ${wasmFiles.length} ONNX WASM/JS files to dist/offscreen/`);
+  console.log(`[build] Copied ${copied} WASM file(s) to dist/offscreen/ (skipped ${skipped} unneeded files)`);
 }
 
 build().catch(err => {
