@@ -1,6 +1,6 @@
 /* ============================================================
    popup.css — YouTube Smart Search Extension
-   Dark theme, YouTube-red accent
+   Supports light and dark themes via prefers-color-scheme
    ============================================================ */
 
 /* ── Reset & base ─────────────────────────────────────────── */
@@ -15,18 +15,42 @@
 [hidden] { display: none !important; }
 
 :root {
-  --yt-red:       #ff0000;
-  --yt-red-hover: #cc0000;
-  --bg:           #0f0f0f;
-  --surface:      #1a1a1a;
-  --surface-2:    #272727;
-  --border:       #333333;
-  --text:         #f1f1f1;
-  --text-muted:   #aaaaaa;
-  --text-dim:     #717171;
-  --radius:       8px;
-  --radius-sm:    4px;
-  --transition:   150ms ease;
+  --yt-red:          #ff0000;
+  --yt-red-hover:    #cc0000;
+  --bg:              #0f0f0f;
+  --surface:         #1a1a1a;
+  --surface-2:       #272727;
+  --border:          #333333;
+  --text:            #f1f1f1;
+  --text-muted:      #aaaaaa;
+  --text-dim:        #717171;
+  --radius:          8px;
+  --radius-sm:       4px;
+  --transition:      150ms ease;
+  --warning-bg:      #1c1500;
+  --warning-border:  #5a4500;
+  --error-bg:        #1c0000;
+  --error-border:    #5a0000;
+  --timestamp-bg:    #1a0000;
+  --timestamp-border:#3a0000;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg:              #ffffff;
+    --surface:         #f2f2f2;
+    --surface-2:       #e5e5e5;
+    --border:          #d0d0d0;
+    --text:            #0f0f0f;
+    --text-muted:      #606060;
+    --text-dim:        #909090;
+    --warning-bg:      #fff8e1;
+    --warning-border:  #f0c040;
+    --error-bg:        #fff0f0;
+    --error-border:    #f0a0a0;
+    --timestamp-bg:    #fff0f0;
+    --timestamp-border:#ffcccc;
+  }
 }
 
 html, body {
@@ -228,16 +252,16 @@ html, body {
 
 /* ── Warning / error card ─────────────────────────────────── */
 .warning-card {
-  background: #1c1500;
-  border: 1px solid #5a4500;
+  background: var(--warning-bg);
+  border: 1px solid var(--warning-border);
   border-radius: var(--radius);
   padding: 16px;
   text-align: center;
 }
 
 .warning-card--error {
-  background: #1c0000;
-  border-color: #5a0000;
+  background: var(--error-bg);
+  border-color: var(--error-border);
 }
 
 .warning-card__icon {
@@ -340,8 +364,8 @@ html, body {
   font-size: 12px;
   font-weight: 600;
   color: var(--yt-red);
-  background: #1a0000;
-  border: 1px solid #3a0000;
+  background: var(--timestamp-bg);
+  border: 1px solid var(--timestamp-border);
   border-radius: 3px;
   padding: 2px 6px;
   line-height: 1.4;
