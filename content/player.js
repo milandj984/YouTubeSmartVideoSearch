@@ -68,6 +68,17 @@ function togglePlayback() {
   }
 }
 
+/**
+ * Returns the current playback state without changing it.
+ * @returns {'playing'|'paused'|'not-found'}
+ */
+function getPlaybackState() {
+  const video = findVideoElement();
+  if (!video) return 'not-found';
+  return video.paused ? 'paused' : 'playing';
+}
+
 // Attach to shared namespace so content.js can invoke it
 window.__ytSearch.seekTo = seekTo;
 window.__ytSearch.togglePlayback = togglePlayback;
+window.__ytSearch.getPlaybackState = getPlaybackState;

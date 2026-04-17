@@ -448,6 +448,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         .catch(err => sendResponse({ error: err.message }));
       return true;
 
+    case 'GET_PLAYBACK_STATE':
+      sendToTab(message.tabId, { type: 'GET_PLAYBACK_STATE' })
+        .then(result => sendResponse({ state: result?.state ?? 'playing' }))
+        .catch(() => sendResponse({ state: 'playing' }));
+      return true;
+
     case 'VIDEO_EXISTS':
       videoExists(message.videoId)
         .then(exists => sendResponse({ exists }))

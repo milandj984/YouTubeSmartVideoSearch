@@ -129,7 +129,11 @@ function renderResults(results) {
 
   searchHint.hidden = true;
 
-  for (const result of results) {
+  // Sort by displayed score (cosine similarity) descending so the UI order
+  // matches the percentage shown on each card.
+  const sorted = [...results].sort((a, b) => b.score - a.score);
+
+  for (const result of sorted) {
     const card = document.createElement('button');
     card.className = 'result-card';
     card.setAttribute('aria-label', `Jump to ${formatTime(result.start)}: ${result.text}`);
@@ -238,7 +242,7 @@ async function performSearch(query) {
   }
 }
 
-function transitionToSearchable() {
+async function transitionToSearchable() {
   setState('searchable');
   searchHint.hidden = false;
   resultsContainer.innerHTML = '';
@@ -247,6 +251,9 @@ function transitionToSearchable() {
     input.value = '';
     input.focus();
   }
+  // Initialise the pause button to reflect the actual current playback state
+  const { state } = await sendMessage({ type: 'GET_PLAYBACK_STATE', tabId: currentTabId });
+  setPauseButtonState(state ?? 'playing');
 }
 
 async function rescanVideo() {

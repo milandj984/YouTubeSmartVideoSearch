@@ -44,6 +44,11 @@ async function handleMessage(message) {
       return { type: 'TOGGLE_PLAYBACK_RESULT', state };
     }
 
+    case 'GET_PLAYBACK_STATE': {
+      const state = window.__ytSearch.getPlaybackState();
+      return { type: 'GET_PLAYBACK_STATE_RESULT', state };
+    }
+
     default:
       return { error: `Unknown message type: ${message.type}` };
   }
