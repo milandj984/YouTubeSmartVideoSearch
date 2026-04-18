@@ -160,7 +160,10 @@ async function sendToTab(tabId, message) {
 /**
  * Opens YouTube's built-in transcript panel via executeScript in MAIN world,
  * then reads the already-rendered segment elements from the DOM.
- * No fetch calls — bypasses YouTube's SW interception entirely.
+ *
+ * Note: direct fetch of YouTube's timedtext API URLs is blocked by YouTube's
+ * own service worker (returns empty HTML), so DOM scraping is the only viable
+ * approach from within the page context.
  */
 async function fetchTranscriptViaPageScript(videoId, tabId) {
   let results;
@@ -169,6 +172,41 @@ async function fetchTranscriptViaPageScript(videoId, tabId) {
       target: { tabId },
       world: 'MAIN',
       func: async () => {
+        // Panel target-ids YouTube has used for the transcript panel.
+        // 'PAmodern_transcript_view' is the current id (2025+).
+        // 'engagement-panel-searchable-transcript' is the legacy id kept as fallback.
+        const PANEL_IDS = [
+          'PAmodern_transcript_view',
+          'engagement-panel-searchable-transcript',
+        ];
+        const PANEL_SEL = PANEL_IDS
+          .map(id => `ytd-engagement-panel-section-list-renderer[target-id="${id}"]`)
+          .join(', ');
+
+        const findOpenPanel = () => {
+          for (const id of PANEL_IDS) {
+            const el = document.querySelector(
+              `ytd-engagement-panel-section-list-renderer[target-id="${id}"]`
+            );
+            // Polymer sets .visibility as a JS property, not always as an attribute
+            if (el && el.visibility !== 'ENGAGEMENT_PANEL_VISIBILITY_HIDDEN') return el;
+          }
+          // Fallback: any panel with the word "transcript" in its target-id that is visible
+          const all = document.querySelectorAll('ytd-engagement-panel-section-list-renderer');
+          for (const el of all) {
+            if ((el.getAttribute('target-id') || '').toLowerCase().includes('transcript') &&
+                el.visibility !== 'ENGAGEMENT_PANEL_VISIBILITY_HIDDEN') return el;
+          }
+          return null;
+        };
+
+        // ── Helper: close the transcript engagement panel ─────────────────────
+        const closePanel = () => {
+          const panel = findOpenPanel() ||
+            document.querySelector(PANEL_SEL);
+          if (panel) panel.visibility = 'ENGAGEMENT_PANEL_VISIBILITY_HIDDEN';
+        };
+
         try {
           const parseTime = (s) => {
             const parts = s.trim().split(':').map(Number);
@@ -177,93 +215,182 @@ async function fetchTranscriptViaPageScript(videoId, tabId) {
             return 0;
           };
 
+          // Segment element selectors, newest YouTube UI first.
+          // transcript-segment-view-model  — 2025+ "PAmodern_transcript_view" panel
+          // ytd-transcript-segment-renderer — legacy panel
+          const SEG_SELECTORS = [
+            'transcript-segment-view-model',
+            'ytd-transcript-segment-renderer',
+          ];
+
+          const anySegments = () =>
+            document.querySelector(SEG_SELECTORS.join(', '));
+
           const readSegments = () => {
-            const segs = document.querySelectorAll('ytd-transcript-segment-renderer');
-            if (!segs.length) return null;
-            const entries = [];
-            for (const seg of segs) {
-              const timeEl = seg.querySelector('.segment-timestamp');
-              const textEl = seg.querySelector('.segment-text');
-              const timeStr = (timeEl?.textContent || '').trim();
-              const text = (textEl?.textContent || '').trim();
-              if (!timeStr || !text) continue;
-              entries.push({ text, start: parseTime(timeStr) });
+            for (const sel of SEG_SELECTORS) {
+              const segs = document.querySelectorAll(sel);
+              if (!segs.length) continue;
+
+              const entries = [];
+
+              if (sel === 'transcript-segment-view-model') {
+                // New panel: each element's innerText looks like:
+                //   "0:07\n7 seconds\nKnowing the difference…"
+                //   or "0:00\n99% of developers…"
+                // The "N seconds" line is a duration label — strip it.
+                for (const seg of segs) {
+                  const raw = (seg.innerText || seg.textContent || '').trim();
+                  const match = raw.match(/^(\d+:\d{2}(?::\d{2})?)\s*([\s\S]*)/);
+                  if (!match) continue;
+                  const timeStr = match[1];
+                  const body = match[2]
+                    .replace(/^\d+\s+seconds?\s*/i, '') // strip leading "N seconds"
+                    .trim();
+                  if (body) entries.push({ text: body, start: parseTime(timeStr) });
+                }
+              } else {
+                // Legacy panel: dedicated timestamp/text child elements
+                for (const seg of segs) {
+                  const timeEl = seg.querySelector('.segment-timestamp');
+                  const textEl = seg.querySelector('.segment-text');
+                  const timeStr = (timeEl?.textContent || '').trim();
+                  const text = (textEl?.textContent || '').trim();
+                  if (!timeStr || !text) continue;
+                  entries.push({ text, start: parseTime(timeStr) });
+                }
+              }
+
+              return entries.length ? entries : null;
             }
-            return entries.length ? entries : null;
+            return null;
           };
 
           // If the panel is already open, just read it
           const existing = readSegments();
-          if (existing) {
-            return { entries: existing };
-          }
+          if (existing) return { entries: existing, method: 'dom-existing' };
 
-          // Try to open the transcript panel
-          let method = 'none';
+          // Try to open the transcript panel by clicking the real "Show transcript"
+          // button. This is the only approach that triggers YouTube's authenticated
+          // continuation fetch — synthetic events open the panel UI but leave the
+          // data fetch unstarted (spinner never resolves).
+          let domMethod = 'none';
 
-          // Method 1: click the "Show transcript" button in the description
-          const btn = document.querySelector(
+          const findTranscriptBtn = () => document.querySelector(
             'ytd-video-description-transcript-section-renderer button, ' +
             'button[aria-label*="ranscript" i], [role="button"][aria-label*="ranscript" i]'
           );
-          if (btn) {
-            btn.click();
-            method = 'btn-click';
-          } else {
-            // Method 2: dispatch YouTube's internal engagement-panel action
-            const app = document.querySelector('ytd-app');
-            if (app) {
-              app.dispatchEvent(new CustomEvent('yt-action', {
-                bubbles: true,
-                composed: true,
-                detail: {
-                  actionName: 'yt-update-engagement-panel-action',
-                  args: [{ targetId: 'engagement-panel-searchable-transcript', visibility: 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED' }],
-                },
-              }));
-              method = 'yt-action';
+
+          let btn = findTranscriptBtn();
+          let didExpand = false;
+
+          if (!btn) {
+            // The button lives inside the description section which YouTube
+            // collapses by default. Expand it so the button is rendered.
+            const expandBtn = document.querySelector(
+              'tp-yt-paper-button#expand, ' +
+              '#description-inline-expander [id="expand"], ' +
+              'ytd-text-inline-expander [id="expand"], ' +
+              '#snippet [id="expand"]'
+            );
+            if (expandBtn) {
+              expandBtn.click();
+              didExpand = true;
+              // Give Polymer a moment to render the newly visible content
+              await new Promise(r => setTimeout(r, 400));
+              btn = findTranscriptBtn();
             }
           }
-          
-          // Poll up to 10 s for segments to appear
+
+          if (btn) {
+            btn.click();
+            domMethod = didExpand ? 'btn-click-after-expand' : 'btn-click';
+          } else {
+            // Last resort: synthetic engagement-panel event.
+            // Try the current panel ID first, then the legacy one.
+            // Content may not load if YouTube's SW blocks the continuation.
+            const app = document.querySelector('ytd-app');
+            if (app) {
+              for (const targetId of PANEL_IDS) {
+                app.dispatchEvent(new CustomEvent('yt-action', {
+                  bubbles: true,
+                  composed: true,
+                  detail: {
+                    actionName: 'yt-update-engagement-panel-action',
+                    args: [{ targetId, visibility: 'ENGAGEMENT_PANEL_VISIBILITY_EXPANDED' }],
+                  },
+                }));
+              }
+              domMethod = 'yt-action-fallback';
+            }
+          }
+
+          // Poll up to 30 s for segments to appear.
+          // Strategy: wait for the spinner to disappear first (signals content loaded
+          // or failed), then check for segments. This handles slow-loading transcripts
+          // without always waiting the full timeout when content truly isn't there.
+          const isSpinnerActive = () => {
+            const p = findOpenPanel();
+            return p ? !!p.querySelector('tp-yt-paper-spinner, ytd-continuation-item-renderer') : false;
+          };
+
           const segments = await new Promise(resolve => {
             let tries = 0;
+            const maxTries = 150; // 30 s at 200 ms intervals
             const timer = setInterval(() => {
-              const segs = document.querySelectorAll('ytd-transcript-segment-renderer');
-              if (segs.length > 0 || ++tries >= 50) { clearInterval(timer); resolve(segs); }
+              if (anySegments()) {
+                clearInterval(timer);
+                resolve(true);
+                return;
+              }
+              // If spinner is gone and we've waited at least 1 s, content won't appear
+              if (tries > 5 && !isSpinnerActive()) {
+                clearInterval(timer);
+                resolve(false);
+                return;
+              }
+              if (++tries >= maxTries) {
+                clearInterval(timer);
+                resolve(false);
+              }
             }, 200);
           });
 
-          if (!segments.length) return { error: `no-dom-segments (${method})` };
+          // Always close the panel, even on failure — avoids leaving it open in the UI
+          if (domMethod !== 'none') closePanel();
 
-          const entries = readSegments();
-
-          // Close the panel we opened. Only close if we were the ones who opened it.
-          // YouTube uses Polymer property observers — setting the JS property directly
-          // on the element triggers the visibility change, unlike setAttribute().
-          if (method !== 'none') {
-            const panel = document.querySelector(
-              'ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-searchable-transcript"]'
-            );
-            if (panel) {
-              panel.visibility = 'ENGAGEMENT_PANEL_VISIBILITY_HIDDEN';
-            }
+          if (!segments) {
+            return {
+              error: `no-captions-available`,
+              diagnostics: `no-dom-segments (${domMethod})`,
+            };
           }
 
-          return entries ? { entries } : { error: 'dom-empty-entries' };
+          const domEntries = readSegments();
+          return domEntries
+            ? { entries: domEntries, method: domMethod }
+            : { error: 'no-captions-available', diagnostics: `dom-empty-entries (${domMethod})` };
+
         } catch (e) {
           return { error: e.message };
         }
       },
     });
   } catch (e) {
+    console.error('[SW] executeScript failed:', e);
     return null;
   }
 
   const result = results?.[0]?.result;
-  if (!result || result.error) {
+  if (!result) return null;
+
+  if (result.error) {
+    // Surface diagnostics to the caller so the error message can be informative
+    if (result.diagnostics) {
+      console.warn(`[SW] Transcript fetch failed for ${videoId}: ${result.diagnostics}`);
+    }
     return null;
   }
+
   return result.entries || null;
 }
 
@@ -299,7 +426,7 @@ async function fetchTranscriptForVideo(videoId, tabId) {
  */
 async function handleScanVideo({ videoId, tabId, title }, sendResponse) {
   try {
-    // Step 1: Get transcript — fetched in background SW, bypasses YouTube's own SW
+    // Step 1: Get transcript via DOM scraping in the YouTube tab
     sendProgressToPopup({ stage: 'transcript', message: 'Fetching transcript…' });
 
     let transcript;
@@ -309,7 +436,7 @@ async function handleScanVideo({ videoId, tabId, title }, sendResponse) {
       sendResponse({
         type: 'SCAN_ERROR',
         noTranscript: err.name === 'NoTranscriptError',
-        message: err.message + (err.diagnostics ? ' | diag: ' + err.diagnostics.join(' | ') : ''),
+        message: err.message,
       });
       return;
     }
@@ -389,6 +516,10 @@ async function handleSearch({ videoId, query }, sendResponse) {
 // Seek handler
 // ---------------------------------------------------------------------------
 
+/**
+ * @param {{ tabId: number, time: number }} params
+ * @param {function} sendResponse
+ */
 async function handleSeek({ tabId, time }, sendResponse) {
   try {
     const result = await sendToTab(tabId, { type: 'SEEK', time });
