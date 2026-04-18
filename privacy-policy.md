@@ -39,7 +39,6 @@ All locally stored data can be deleted at any time by uninstalling the extension
 | `activeTab` | Access the currently open YouTube tab to read the video transcript and metadata |
 | `scripting` | Inject content scripts into YouTube pages to extract the transcript and control video playback |
 | `offscreen` | Run the ONNX embedding model in an isolated offscreen document, keeping the heavy WASM runtime away from the main extension process |
-| `storage` | Store user settings and preferences locally |
 | `host_permissions: https://www.youtube.com/*` | Read transcript and video data from YouTube pages |
 
 ## Contact

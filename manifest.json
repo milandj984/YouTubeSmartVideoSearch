@@ -38,8 +38,7 @@
   "permissions": [
     "activeTab",
     "scripting",
-    "offscreen",
-    "storage"
+    "offscreen"
   ],
 
   "host_permissions": [
